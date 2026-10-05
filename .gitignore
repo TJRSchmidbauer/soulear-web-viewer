@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.log
+photos/
+recordings/
+cert.crt
+private.key
+*.mjpeg

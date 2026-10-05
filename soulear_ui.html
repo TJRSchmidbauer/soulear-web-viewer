@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>WiFi-Otoskop Viewer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: #000;
+    color: #eaeaea;
+    font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10px 16px;
+    font-size: 13px;
+    letter-spacing: .02em;
+    color: #b9b9b9;
+    z-index: 3;
+  }
+  .topbar .model { color: #fff; font-weight: 600; }
+  .topbar .meta { display: flex; gap: 14px; align-items: center; white-space: nowrap; }
+  .batt { display: inline-flex; align-items: center; gap: 6px; }
+  .batt .cell {
+    width: 26px; height: 13px; border: 1.5px solid #9a9a9a; border-radius: 3px;
+    position: relative; padding: 1.5px;
+  }
+  .batt .cell::after {
+    content: ""; position: absolute; right: -4px; top: 3px;
+    width: 2px; height: 5px; background: #9a9a9a; border-radius: 0 1px 1px 0;
+  }
+  .batt .fill { display: block; height: 100%; background: #46d160; border-radius: 1px; }
+  .batt.low .fill { background: #ff5252; }
+  .batt.charging .fill { background: #ffc94d; }
+
+  .stage {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    padding: 4px;
+  }
+
+  .viewport {
+    position: relative;
+    width: min(94vw, 76vh);
+    aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    overflow: hidden;
+    background: #070707;
+    box-shadow: 0 0 0 2px #262626, 0 0 70px rgba(0, 0, 0, .9);
+  }
+  .viewport img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transform-origin: 50% 50%;
+    image-rendering: high-quality;
+  }
+
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    text-align: center;
+    background: rgba(0, 0, 0, .72);
+    color: #ddd;
+    font-size: 15px;
+    z-index: 2;
+  }
+  .overlay[hidden] { display: none; }
+  .overlay .sub { font-size: 12.5px; color: #8f8f8f; max-width: 70%; }
+
+  .toast {
+    position: absolute;
+    left: 50%;
+    bottom: 96px;
+    transform: translateX(-50%) translateY(6px);
+    background: rgba(20, 20, 20, .94);
+    border: 1px solid #333;
+    color: #fff;
+    padding: 9px 15px;
+    border-radius: 999px;
+    font-size: 13px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .18s, transform .18s;
+    z-index: 6;
+    white-space: nowrap;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  .controls {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 6px;
+    padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
+    background: linear-gradient(to top, #060606 60%, rgba(6, 6, 6, 0));
+    z-index: 3;
+    flex-wrap: wrap;
+  }
+  .btn {
+    appearance: none;
+    border: 1px solid #2c2c2c;
+    background: #141414;
+    color: #d6d6d6;
+    border-radius: 12px;
+    min-width: 76px;
+    padding: 9px 12px 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    font: inherit;
+    font-size: 11.5px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s, transform .05s;
+  }
+  .btn:hover { background: #1d1d1d; border-color: #3a3a3a; }
+  .btn:active { transform: scale(.97); }
+  .btn[aria-pressed="true"] {
+    background: #123d24;
+    border-color: #2c8a4d;
+    color: #7bf0a4;
+  }
+  .btn:disabled { opacity: .38; cursor: not-allowed; }
+  .btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .btn.rec[aria-pressed="true"] {
+    background: #401414;
+    border-color: #b04141;
+    color: #ff9090;
+  }
+  .btn.rec[aria-pressed="true"] svg circle { fill: currentColor; animation: recpulse 1.4s ease-in-out infinite; }
+  @keyframes recpulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+
+  .devtag {
+    position: absolute;
+    left: 50%;
+    bottom: 100px;
+    transform: translateX(-50%);
+    font-size: 11.5px;
+    color: #6d6d6d;
+    letter-spacing: .04em;
+    z-index: 4;
+    pointer-events: none;
+  }
+  .devtag b { color: #9c9c9c; font-weight: 600; }
+
+  /* Werkzeugleiste rechts oben - nur Icons, kein Text */
+  .tools {
+    position: absolute;
+    right: 10px;
+    top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    z-index: 4;
+  }
+  .tool {
+    appearance: none;
+    border: 1px solid #2c2c2c;
+    background: rgba(20, 20, 20, .88);
+    color: #c9c9c9;
+    border-radius: 10px;
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s, transform .05s;
+  }
+  .tool:hover { background: #1d1d1d; border-color: #3a3a3a; }
+  .tool:active { transform: scale(.94); }
+  .tool[aria-pressed="true"] {
+    background: #123d24;
+    border-color: #2c8a4d;
+    color: #7bf0a4;
+  }
+  .tool svg { width: 19px; height: 19px; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* Drittel-Raster über dem Bild */
+  .grid {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    background:
+      linear-gradient(to right, transparent calc(33.33% - .5px), rgba(255,255,255,.34) calc(33.33% - .5px), rgba(255,255,255,.34) calc(33.33% + .5px), transparent calc(33.33% + .5px)),
+      linear-gradient(to right, transparent calc(66.66% - .5px), rgba(255,255,255,.34) calc(66.66% - .5px), rgba(255,255,255,.34) calc(66.66% + .5px), transparent calc(66.66% + .5px)),
+      linear-gradient(to bottom, transparent calc(33.33% - .5px), rgba(255,255,255,.34) calc(33.33% - .5px), rgba(255,255,255,.34) calc(33.33% + .5px), transparent calc(33.33% + .5px)),
+      linear-gradient(to bottom, transparent calc(66.66% - .5px), rgba(255,255,255,.34) calc(66.66% - .5px), rgba(255,255,255,.34) calc(66.66% + .5px), transparent calc(66.66% + .5px));
+  }
+  .grid[hidden] { display: none; }
+
+  /* Info-Panel links oben */
+  .infopanel {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    z-index: 5;
+    background: rgba(12, 12, 12, .95);
+    border: 1px solid #2c2c2c;
+    border-radius: 12px;
+    padding: 10px 12px;
+    font-size: 12px;
+    color: #cfcfcf;
+    min-width: 216px;
+    line-height: 1.55;
+    max-height: calc(100% - 20px);
+    overflow: auto;
+  }
+  .infopanel[hidden] { display: none; }
+  .infopanel .row { display: flex; justify-content: space-between; gap: 16px; }
+  .infopanel b { color: #fff; font-weight: 600; }
+  .infopanel .hd { color: #8f8f8f; text-transform: uppercase; font-size: 10.5px; letter-spacing: .08em; margin: 6px 0 2px; }
+
+  .ring {
+    position: absolute;
+    inset: -2px;
+    border-radius: 50%;
+    border: 2px solid transparent;
+    border-top-color: #2c8a4d;
+    opacity: 0;
+    z-index: 5;
+    pointer-events: none;
+  }
+  .ring.on { opacity: 1; animation: spin 1.1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 560px) {
+    .btn { min-width: 62px; padding: 8px 9px 7px; font-size: 10.5px; }
+    .topbar { font-size: 12px; padding: 8px 12px; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="topbar">
+    <div class="model" id="model">Verbinde…</div>
+    <div class="meta">
+      <span id="angle">–</span>
+      <span class="batt" id="batt">
+        <span class="cell"><span class="fill" id="battFill" style="width:0%"></span></span>
+        <span id="battTxt">–</span>
+      </span>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="viewport" id="viewport">
+      <img id="video" alt="Livebild">
+      <div class="ring" id="ring"></div>
+      <div class="grid" id="gridOverlay" hidden></div>
+      <div class="overlay" id="overlay">
+        <div id="overlayTitle">Verbinde mit der Kamera…</div>
+        <div class="sub" id="overlaySub"></div>
+      </div>
+    </div>
+
+    <div class="infopanel" id="infoPanel" hidden></div>
+
+    <div class="tools">
+      <button class="tool" id="btnBright" title="Helligkeit erhöhen (100 → 125 → 150 → 75 %)">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M5 5l1.8 1.8M17.2 17.2 19 19M19 5l-1.8 1.8M6.8 17.2 5 19"/></svg>
+      </button>
+
+      <button class="tool" id="btnContrast" title="Kontrast erhöhen (100 → 125 → 150 → 75 %)">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 1 0 17z" fill="currentColor" stroke="none"/></svg>
+      </button>
+
+      <button class="tool" id="btnGrid" aria-pressed="false" title="Drittel-Raster ein-/ausblenden">
+        <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/><path d="M9.2 3.5v17M14.8 3.5v17M3.5 9.2h17M3.5 14.8h17"/></svg>
+      </button>
+
+      <button class="tool" id="btnFreeze" aria-pressed="false" title="Bild einfrieren / wieder live schalten">
+        <svg viewBox="0 0 24 24"><path d="M12 3v18M4.2 7.5l15.6 9M19.8 7.5l-15.6 9M12 7l-2.4-2M12 7l2.4-2M12 17l-2.4 2M12 17l2.4 2"/></svg>
+      </button>
+
+      <button class="tool" id="btnInfo" aria-pressed="false" title="Geräte- und Streamdaten anzeigen">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5"/><circle cx="12" cy="7.8" r="1" fill="currentColor" stroke="none"/></svg>
+      </button>
+    </div>
+
+    <div class="devtag" id="devtag"></div>
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <div class="controls">
+    <button class="btn" id="btnPhoto" title="Aktuelles Bild speichern">
+      <svg viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.7l1.2-2h7.2l1.2 2h1.7A2.5 2.5 0 0 1 21 8.5v9A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="13" r="3.6"/></svg>
+      Foto
+    </button>
+
+    <button class="btn rec" id="btnRec" aria-pressed="false" title="Video aufnehmen (liegt als .mjpeg im recordings-Ordner des Servers)">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6"/></svg>
+      <span id="recLabel">Aufnahme</span>
+    </button>
+
+    <button class="btn" id="btnMirror" aria-pressed="false" title="Bild horizontal spiegeln">
+      <svg viewBox="0 0 24 24"><path d="M12 3v18"/><path d="M8.5 7 4 12l4.5 5z"/><path d="M15.5 7 20 12l-4.5 5z"/></svg>
+      Spiegel
+    </button>
+
+    <button class="btn" id="btnLed" aria-pressed="false" title="Ringlicht an/aus">
+      <svg viewBox="0 0 24 24"><path d="M9.5 18.5h5M10.5 21.5h3"/><path d="M12 2.5a6.2 6.2 0 0 0-3.7 11.2c.8.6 1.2 1.4 1.2 2.3h5c0-.9.4-1.7 1.2-2.3A6.2 6.2 0 0 0 12 2.5z"/></svg>
+      Ringlicht
+    </button>
+
+    <button class="btn" id="btnRotate" aria-pressed="true" title="Bild mit dem Gerät mitdrehen">
+      <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.6-5.9"/><path d="M20 4v4.5h-4.5"/></svg>
+      Rotation
+    </button>
+
+    <button class="btn" id="btnInvert" aria-pressed="false" title="Drehrichtung umkehren">
+      <svg viewBox="0 0 24 24"><path d="M8 4v16"/><path d="M4 8l4-4 4 4"/><path d="M16 20V4"/><path d="M20 16l-4 4-4-4"/></svg>
+      Richtung
+    </button>
+
+    <button class="btn" id="btnCal" title="Aktuelle Ausrichtung als oben festlegen">
+      <svg viewBox="0 0 24 24"><path d="M12 4v16"/><path d="M4 12h16"/><circle cx="12" cy="12" r="3.2"/></svg>
+      Kalibrieren
+    </button>
+
+    <button class="btn" id="btnFull" title="Vollbild">
+      <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+      Vollbild
+    </button>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = (id) => document.getElementById(id);
+  const video = $("video");
+  const overlay = $("overlay");
+  const toastEl = $("toast");
+
+  const state = {
+    mirror: false,
+    autoRotate: true,
+    invert: false,
+    offset: 0,
+    roll: null,
+    displayRoll: 0,
+    targetRoll: null,
+    smoothedRoll: null,
+    recording: false,
+    online: false,
+    ledSupported: null,
+    ledOn: false,
+    restarting: false,
+    bright: 100,
+    contrast: 100,
+    grid: false,
+    freeze: false,
+    freezeURL: null,
+    dev: null,
+    stats: null,
+  };
+
+  // Stabilisierung der Eigenrotation: der 9-Bit-Accelerometer springt in
+  // ~0,44°-Schritten, atan2 verstaerkt das Rauschen zusätzlich - ohne
+  // Schwellwert (Totzone) und Glättung zuckt das Bild wie eine Kugel in der
+  // Rinne hin und her, sobald die Hand nur leicht zittert
+  const DEADBAND = 0.7;      // Grad, unterhalb derer nicht nachgefuehrt wird
+  const SMOOTH_TAU = 70;     // ms Zeitkonstante der Glättung (je kleiner, direkter)
+
+  // Einstellungen unter einem nicht geschützten Präfix ablegen; ältere
+  // Schlüssel (frühere Fassung) werden einmalig mitübernommen
+  const KEY_PREFIX = "otoskop.";
+  const KEY_LEGACY = "soulear.";
+  const store = {
+    get(k, d) {
+      try {
+        let v = localStorage.getItem(KEY_PREFIX + k);
+        if (v === null) {
+          v = localStorage.getItem(KEY_LEGACY + k);
+          if (v !== null) localStorage.setItem(KEY_PREFIX + k, v);
+        }
+        return v === null ? d : JSON.parse(v);
+      } catch (e) { return d; }
+    },
+    set(k, v) { try { localStorage.setItem(KEY_PREFIX + k, JSON.stringify(v)); } catch (e) {} },
+    has(k) {
+      try {
+        return localStorage.getItem(KEY_PREFIX + k) !== null ||
+               localStorage.getItem(KEY_LEGACY + k) !== null;
+      } catch (e) { return false; }
+    },
+  };
+
+  state.mirror = !!store.get("mirror", false);
+  state.autoRotate = store.get("autoRotate", true) !== false;
+  state.invert = !!store.get("invert", false);
+  state.offset = store.has("offset") ? (Number(store.get("offset", 0)) || 0) : null;
+  state.bright = Number(store.get("bright", 100)) || 100;
+  state.contrast = Number(store.get("contrast", 100)) || 100;
+  state.grid = !!store.get("grid", false);
+
+  function toast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => toastEl.classList.remove("show"), 2600);
+  }
+
+  function showOverlay(title, sub) {
+    $("overlayTitle").textContent = title;
+    $("overlaySub").textContent = sub || "";
+    overlay.hidden = false;
+  }
+  function hideOverlay() { overlay.hidden = true; }
+
+  async function jget(url) {
+    const r = await fetch(url, { cache: "no-store" });
+    const text = await r.text();
+    let body = null;
+    try { body = JSON.parse(text); } catch (e) { body = { raw: text }; }
+    return { ok: r.ok, status: r.status, body };
+  }
+
+  /* ---------- Bild transformieren (Rotation + Spiegelung) ---------- */
+
+  function applyTransform() {
+    let deg = 0;
+    if (state.autoRotate && state.roll !== null) {
+      const base = state.smoothedRoll === null ? state.displayRoll : state.smoothedRoll;
+      deg = base + (state.offset || 0);
+      if (state.invert) deg = -deg;
+    }
+    const mirror = state.mirror ? "scaleX(-1) " : "";
+    video.style.transform = mirror + "rotate(" + deg.toFixed(3) + "deg)";
+    video.style.filter = (state.bright === 100 && state.contrast === 100)
+      ? ""
+      : "brightness(" + state.bright + "%) contrast(" + state.contrast + "%)";
+    updateAngle();
+  }
+
+  function updateAngle() {
+    $("angle").textContent = state.roll === null
+      ? "–"
+      : Math.round(((state.roll % 360) + 360) % 360) + "°";
+  }
+
+  // Roll ist auf [0,360) begrenzt - fuer die Animation die Winkel "entpacken",
+  // damit 359° -> 1° nicht den ganzen Kreis zurueckdreht
+  function unwrap(r) {
+    if (state.roll === null) {
+      state.roll = r;
+      state.displayRoll = r;
+      state.targetRoll = r;
+      state.smoothedRoll = r;
+      // Ohne gespeicherte Kalibrierung beginnt das Bild gerade: die absolute
+      // Neigung der Kamera wird zum Startpunkt der relativen Drehung
+      if (state.offset === null) {
+        state.offset = -r;
+        store.set("offset", state.offset);
+      }
+      return;
+    }
+    let d = r - state.roll;
+    while (d > 180) d -= 360;
+    while (d < -180) d += 360;
+    state.displayRoll += d;
+    state.roll = r;
+    // Totzone: nur echte Drehung durchlassen, Rauschen wird verworfen
+    if (Math.abs(state.displayRoll - state.targetRoll) > DEADBAND) {
+      state.targetRoll = state.displayRoll;
+    }
+  }
+
+  // Glättung mit 60fps statt CSS-Transition: die Totzone liefert den Zielwert in
+  // Diskreten Spruengen, das exponentielle Mittel macht daraus einen ruhigen Schwenk
+  function smoothTick(ts) {
+    requestAnimationFrame(smoothTick);
+    if (state.targetRoll === null) return;
+    const dt = smoothTick.last ? Math.min(ts - smoothTick.last, 120) : 16;
+    smoothTick.last = ts;
+    if (state.smoothedRoll === null) {
+      state.smoothedRoll = state.targetRoll;
+      applyTransform();
+      return;
+    }
+    const k = 1 - Math.exp(-dt / SMOOTH_TAU);
+    const next = state.smoothedRoll + (state.targetRoll - state.smoothedRoll) * k;
+    if (Math.abs(next - state.smoothedRoll) < 0.002) return;
+    state.smoothedRoll = next;
+    applyTransform();
+  }
+
+  function snapRotation() {
+    state.targetRoll = state.displayRoll;
+    state.smoothedRoll = state.displayRoll;
+  }
+
+  async function pollPosition() {
+    // SSE liefert die Neigung schon bei jedem UDP-Paket; das Polling bleibt nur
+    // als Rückfall aktiv, wenn die Event-Verbindung weg ist
+    if (sseLive) return;
+    try {
+      const { ok, body } = await jget("/position");
+      if (ok) onPosition(body);
+    } catch (e) { /* kurzfristig egal */ }
+  }
+
+  function onPosition(body) {
+    if (!body || typeof body.roll !== "number") return;
+    unwrap(body.roll);
+    updateAngle();   // Bild selbst zeichnet die Glättungsschleife (60fps)
+  }
+
+  let sseLive = false;
+
+  function startEvents() {
+    let es;
+    try { es = new EventSource("/events"); } catch (e) { return null; }
+    es.onopen = () => { sseLive = true; };
+    es.onmessage = (ev) => {
+      let body;
+      try { body = JSON.parse(ev.data); } catch (e) { return; }
+      if (body && typeof body.roll === "number") {
+        sseLive = true;
+        onPosition(body);
+      }
+    };
+    es.onerror = () => { sseLive = false; };  // EventSource verbindet selbst neu
+    return es;
+  }
+
+  /* ---------- Geraetestatus ---------- */
+
+  function renderDevice(d) {
+    const label = [d.vendor, d.model, d.version].filter(Boolean).join(" ");
+    $("model").textContent = label || "Unbekanntes Geraet";
+    const b = typeof d.battery === "number" ? d.battery : null;
+    $("battTxt").textContent = b === null ? "–" : b + "%";
+    $("battFill").style.width = (b === null ? 0 : Math.max(0, Math.min(100, b))) + "%";
+    $("batt").classList.toggle("low", b !== null && b <= 20 && !d.charging);
+    $("batt").classList.toggle("charging", !!d.charging);
+    $("devtag").innerHTML = d.ssid ? "SSID <b>" + escapeHtml(d.ssid) + "</b>" : "";
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+
+  async function pollDevice() {
+    try {
+      const { ok, body } = await jget("/device");
+      if (ok && body && body.online) {
+        if (!state.online) toast("Kamera verbunden");
+        state.online = true;
+        state.dev = body;
+        renderDevice(body);
+        renderInfo();
+        hideOverlay();
+      } else {
+        goOffline(body && body.error ? body.error : "kein Antwort");
+      }
+    } catch (e) {
+      goOffline("Server nicht erreichbar");
+    }
+  }
+
+  function goOffline(reason) {
+    const was = state.online;
+    state.online = false;
+    if (was) toast("Kamera getrennt");
+    showOverlay("Kamera nicht erreichbar", reason || "");
+  }
+
+  /* ---------- Stream_ueberwachung ---------- */
+
+  function startStream() {
+    if (state.restarting) return;
+    if (state.freeze) return;          // eingefrorenes Bild nicht überschreiben
+    state.restarting = true;
+    video.src = "/stream?t=" + Date.now();
+    setTimeout(() => { state.restarting = false; }, 3000);
+  }
+
+  video.addEventListener("loadeddata", () => { hideOverlay(); });
+  video.addEventListener("error", () => {
+    if (state.freeze) return;
+    showOverlay("Stream nicht verfuegbar", "Neuverbindung wird versucht…");
+    setTimeout(startStream, 2000);
+  });
+
+  let framesSeen = -1;
+  async function pollStats() {
+    try {
+      const { ok, body } = await jget("/stats");
+      if (!ok || !body) return;
+      state.stats = body;
+      if (typeof body.frames === "number") {
+        // Beim Einfrieren ist bewusst kein Stream aktiv - keine Neuaufbau-Warnung
+        if (!state.freeze && framesSeen >= 0 && body.frames === framesSeen && body.ms_since_frame > 4000) {
+          showOverlay("Bild friert ein", "Stille seit " + Math.round(body.ms_since_frame / 1000) + " s - Verbindung wird erneuert");
+          startStream();
+        }
+        framesSeen = body.frames;
+      }
+      if (body.recording) syncRec(body.recording);
+      renderInfo();
+    } catch (e) { /* egal */ }
+  }
+
+  /* ---------- Info-Panel ---------- */
+
+  function renderInfo() {
+    const panel = $("infoPanel");
+    if (!panel || panel.hidden) return;
+    const d = state.dev || {};
+    const s = state.stats || {};
+    const rec = s.recording || {};
+    const val = (x) => (x === null || x === undefined || x === "" ? "–" : x);
+    const rows = (title, list) =>
+      `<div class="hd">${title}</div>` +
+      list.map(([k, v]) => `<div class="row"><span>${k}</span><b>${escapeHtml(String(val(v)))}</b></div>`).join("");
+    panel.innerHTML =
+      rows("Gerät", [
+        ["Modell", [d.vendor, d.model].filter(Boolean).join(" ")],
+        ["Firmware", d.version],
+        ["Akku", typeof d.battery === "number" ? d.battery + "%" + (d.charging ? " · lädt" : "") : null],
+        ["WLAN", d.ssid],
+        ["Netzwerk", d.online ? "verbunden" : "getrennt"],
+      ]) +
+      rows("Stream", [
+        ["Auflösung", s.jpeg_width ? s.jpeg_width + "×" + s.jpeg_height : null],
+        ["Bilder", s.frames],
+        ["Fehler", s.errors],
+        ["Verworfen", s.discards],
+        ["Framealter", typeof s.ms_since_frame === "number" ? s.ms_since_frame + " ms" : null],
+        ["Heartbeat", typeof s.hb_age_ms === "number" ? s.hb_age_ms + " ms" : null],
+        ["Aufnahme", rec.active ? "aktiv (" + (rec.frames || 0) + " Bilder)" : "aus"],
+      ]);
+  }
+
+  /* ---------- Bedienung ---------- */
+
+  function bindToggle(btn, key, onChange) {
+    const el = $(btn);
+    const sync = () => el.setAttribute("aria-pressed", String(!!state[key]));
+    el.addEventListener("click", () => {
+      state[key] = !state[key];
+      store.set(key, state[key]);
+      sync();
+      onChange && onChange();
+    });
+    sync();
+  }
+
+  bindToggle("btnMirror", "mirror", applyTransform);
+  bindToggle("btnRotate", "autoRotate", () => { snapRotation(); applyTransform(); });
+  bindToggle("btnInvert", "invert", applyTransform);
+
+  /* ---------- Werkzeugleiste: Helligkeit, Kontrast, Raster, Einfrieren, Info ---------- */
+
+  const LEVELS = [100, 125, 150, 75];   // Stufen in Prozent, die durchgeschaltet werden
+
+  function cycleLevel(key, label) {
+    const i = LEVELS.indexOf(state[key]);
+    state[key] = LEVELS[(i + 1) % LEVELS.length];
+    store.set(key, state[key]);
+    applyTransform();
+    toast(label + " " + state[key] + "%");
+  }
+
+  $("btnBright").addEventListener("click", () => cycleLevel("bright", "Helligkeit"));
+  $("btnContrast").addEventListener("click", () => cycleLevel("contrast", "Kontrast"));
+
+  function syncGrid() {
+    $("btnGrid").setAttribute("aria-pressed", String(state.grid));
+    $("gridOverlay").hidden = !state.grid;
+  }
+  $("btnGrid").addEventListener("click", () => {
+    state.grid = !state.grid;
+    store.set("grid", state.grid);
+    syncGrid();
+  });
+
+  function setFreeze(on) {
+    state.freeze = on;
+    $("btnFreeze").setAttribute("aria-pressed", String(on));
+    if (on) {
+      fetch("/snapshot?t=" + Date.now(), { cache: "no-store" })
+        .then((r) => { if (!r.ok) throw new Error("kein Bild"); return r.blob(); })
+        .then((blob) => {
+          if (state.freezeURL) URL.revokeObjectURL(state.freezeURL);
+          state.freezeURL = URL.createObjectURL(blob);
+          video.src = state.freezeURL;
+          hideOverlay();
+          toast("Bild eingefroren");
+        })
+        .catch(() => {
+          state.freeze = false;
+          $("btnFreeze").setAttribute("aria-pressed", "false");
+          toast("Kein Bild zum Einfrieren");
+        });
+    } else {
+      if (state.freezeURL) { URL.revokeObjectURL(state.freezeURL); state.freezeURL = null; }
+      state.restarting = false;
+      startStream();
+      toast("Live-Bild");
+    }
+  }
+  $("btnFreeze").addEventListener("click", () => setFreeze(!state.freeze));
+
+  $("btnInfo").addEventListener("click", () => {
+    const panel = $("infoPanel");
+    const on = panel.hidden;
+    panel.hidden = !on;
+    $("btnInfo").setAttribute("aria-pressed", String(on));
+    if (on) renderInfo();
+  });
+
+  /* ---------- Aufnahme (liegt als .mjpeg auf dem Server) ---------- */
+
+  function fmtDur(s) {
+    s = Math.max(0, s | 0);
+    return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
+  }
+
+  function syncRec(st) {
+    if (!st) return;
+    const on = !!st.active;
+    state.recording = on;
+    $("btnRec").setAttribute("aria-pressed", on ? "true" : "false");
+    $("recLabel").textContent = on ? fmtDur(st.seconds) : "Aufnahme";
+    syncRec.lastPath = st.path;
+    syncRec.lastFrames = st.frames;
+  }
+
+  async function setRecording(on) {
+    try {
+      const { ok, body } = await jget("/record?on=" + (on ? 1 : 0));
+      if (!ok || !body) { toast("Aufnahme nicht erreichbar"); return; }
+      if (body.error) { toast("Aufnahme: " + body.error); }
+      syncRec(body);
+      if (on && body.active) {
+        toast("Zeichne auf: recordings/" + (body.path || "").split("/").pop());
+      } else if (!on && body.path) {
+        toast("Aufgehört - " + (body.frames || 0) + " Bilder in recordings/" + body.path.split("/").pop());
+      }
+    } catch (e) {
+      toast("Aufnahme fehlgeschlagen");
+    }
+  }
+
+  $("btnRec").addEventListener("click", () => setRecording(!state.recording));
+
+  $("btnCal").addEventListener("click", () => {
+    if (state.roll === null) { toast("Noch keine Sensordaten"); return; }
+    // Aktuelle Ausrichtung als "oben" festlegen (invert faellt in beiden
+    // Richtungen weg, daher derselbe Wert)
+    state.offset = -state.displayRoll;
+    store.set("offset", state.offset);
+    snapRotation();
+    applyTransform();
+    toast("Kalibriert");
+  });
+
+  $("btnPhoto").addEventListener("click", async () => {
+    try {
+      const r = await fetch("/snapshot?t=" + Date.now(), { cache: "no-store" });
+      if (!r.ok) { toast("Noch kein Bild im Puffer"); return; }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const d = new Date();
+      const pad = (n) => String(n).padStart(2, "0");
+      a.href = url;
+      a.download = "otoskop_" + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) +
+                   "_" + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds()) + ".jpg";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      toast("Foto gespeichert");
+    } catch (e) {
+      toast("Foto fehlgeschlagen");
+    }
+  });
+
+  $("btnLed").addEventListener("click", async () => {
+    const want = !state.ledOn;
+    try {
+      const { ok, body } = await jget("/led?on=" + (want ? 1 : 0));
+      if (ok && body && body.supported) {
+        state.ledOn = !!body.on;
+        state.ledSupported = true;
+        syncLed();
+        toast(state.ledOn ? "Ringlicht an" : "Ringlicht aus");
+      } else {
+        state.ledSupported = false;
+        syncLed();
+        toast("Ringlicht wird von diesem Geraet nicht unterstuetzt");
+      }
+    } catch (e) {
+      toast("Ringlicht nicht erreichbar");
+    }
+  });
+
+  function syncLed() {
+    const el = $("btnLed");
+    el.setAttribute("aria-pressed", String(state.ledOn));
+    el.disabled = state.ledSupported === false;
+  }
+
+  $("btnFull").addEventListener("click", () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen && document.documentElement.requestFullscreen();
+  });
+  document.addEventListener("fullscreenchange", () => {
+    $("btnFull").setAttribute("aria-pressed", String(!!document.fullscreenElement));
+  });
+
+  /* ---------- Start ---------- */
+
+  syncLed();
+  syncGrid();
+  applyTransform();
+  requestAnimationFrame(smoothTick);
+  startStream();
+  startEvents();
+  pollDevice();
+  setInterval(pollDevice, 5000);
+  setInterval(pollPosition, 250);
+  setInterval(pollStats, 1000);
+  setInterval(async () => {
+    if (state.ledSupported !== false) {
+      try {
+        const { ok, body } = await jget("/led");
+        if (ok && body && body.supported) { state.ledOn = !!body.on; state.ledSupported = true; syncLed(); }
+        else if (ok && body && body.supported === false) { state.ledSupported = false; syncLed(); }
+      } catch (e) {}
+    }
+  }, 15000);
+})();
+</script>
+</body>
+</html>
