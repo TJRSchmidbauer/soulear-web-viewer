@@ -15,6 +15,11 @@
 **Tested device:** `YPC BK7231U-XRH-FBPRO`, firmware `HKV41B`
 (camera IP `192.168.1.1`, sensor HI708 → 480×480 JPEG).
 
+🛒 **Developed against this unit:** [Hopefox Ear Wax Remover — 1080P HD WiFi
+Ear Cleaner with Camera and 6 LEDs](https://www.amazon.de/dp/B0CVX5CJPW)
+(Amazon ASIN `B0CVX5CJPW`). The listing advertises 1080p, the shipped hardware
+streams 480×480 — see [⚠️ Known quirks](#-known-device-quirks).
+
 This repository is a fork of
 [SeanPesce/Suear-Web-Viewer](https://github.com/SeanPesce/Suear-Web-Viewer)
 with a browser UI, low-latency orientation, on-demand recording and a number of
@@ -173,6 +178,7 @@ detected, so record or view on battery, then dock it. The device is small
 | 💥 | Command `0x0008` with a non-empty payload **powers the camera off** — the mirror only ever sends an empty payload. |
 | 🧭 | Roll is gravity-referenced (`atan2(y, z)`), with a fixed 180° mount offset for `FBPRO`/`R1` products. |
 | 📉 | There is no higher resolution than 480×480 available on this hardware. |
+| 🛒 | The **Amazon listing claims 1080p** ([ASIN B0CVX5CJPW](https://www.amazon.de/dp/B0CVX5CJPW), “up to 30 fps”), but the unit in hand delivers **480×480** JPEGs at ~15 fps: `/stats` reports `jpeg_width/jpeg_height`, saved photos and recordings measure 480×480, and the frame header’s `640×480` is a fixed value from a generic firmware — it does not describe the sensor. Marketing/spec-sheet mismatch typical for white-label units on the BK7231U platform. |
 
 ---
 
