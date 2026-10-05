@@ -179,6 +179,7 @@ detected, so record or view on battery, then dock it. The device is small
 | 🧭 | Roll is gravity-referenced (`atan2(y, z)`), with a fixed 180° mount offset for `FBPRO`/`R1` products. |
 | 📉 | There is no higher resolution than 480×480 available on this hardware. |
 | 🛒 | The **Amazon listing claims 1080p** ([ASIN B0CVX5CJPW](https://www.amazon.de/dp/B0CVX5CJPW), “up to 30 fps”), but the unit in hand delivers **480×480** JPEGs at ~15 fps: `/stats` reports `jpeg_width/jpeg_height`, saved photos and recordings measure 480×480, and the frame header’s `640×480` is a fixed value from a generic firmware — it does not describe the sensor. Marketing/spec-sheet mismatch typical for white-label units on the BK7231U platform. |
+| 🔧 | **`0x000D` (GetCameraConfig) is an empty block on this unit.** The camera always answers with **56 bytes of zeros**, no matter which index payload is sent (`00`, `01`, `02`, `0000`, …), and the DevInfo feature-flag byte at `0x7c` is `0x00` too. So there is no resolution/fps/heat field to read – and nothing to safely write back with `0x000E`. Probed read-only via `/cameracfg` and a raw UDP script; writing to `0x000E` blind is not worth it on a device where `0x0008` with a payload already powers the camera off. |
 
 ---
 

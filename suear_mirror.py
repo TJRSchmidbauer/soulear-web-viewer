@@ -841,6 +841,10 @@ class SuearClient:
     STALL_KEEPALIVE_AFTER_S = 1.5
     SELECT_TIMEOUT_S = 1.0
     COMMAND_TIMEOUT_S = 5.0
+    # Never let one wedged exchange freeze every other HTTP request: waiting for
+    # the control-channel lock is bounded as well, so /device and friends can
+    # still answer (with 503) instead of hanging until the client gives up
+    COMMAND_LOCK_TIMEOUT_S = 5.0
     
     def __init__(self, server=DEFAULT_SERVER, cmd_send_index=0):
         self.server = socket.gethostbyname(server)  # Server host name or IP address
@@ -1172,7 +1176,11 @@ class SuearClient:
         if not (connecting or self.connected):
             self.connect()
 
-        with self._cmd_lock:
+        if not self._cmd_lock.acquire(timeout=self.__class__.COMMAND_LOCK_TIMEOUT_S):
+            raise IOError(f'Control channel busy: no reply to a previous '
+                          f'{getattr(msg, "type_name", "command")} within '
+                          f'{self.__class__.COMMAND_LOCK_TIMEOUT_S}s')
+        try:
             msg.id = self.increment()
             if not port:
                 port = self.__class__.COMMAND_PORT
@@ -1182,11 +1190,19 @@ class SuearClient:
 
             server_address = (self.server, port)
             sock.sendto(bytes(msg), server_address)
+            # Bounded as well: if the device floods us with pushes of the wrong
+            # type, recvfrom() never times out and the loop (and with it the
+            # lock) would run forever
+            deadline = time.monotonic() + self.__class__.COMMAND_TIMEOUT_S * 2
             while True:
                 try:
                     response_data, server = sock.recvfrom(0x1000)#msg.sizeof())
                 except socket.timeout:
                     raise IOError(f'Timeout waiting for reply to {getattr(msg, "type_name", "command")} from {self.server}')
+                if time.monotonic() > deadline:
+                    raise IOError(f'No matching reply to {getattr(msg, "type_name", "command")} '
+                                  f'from {self.server} within '
+                                  f'{2 * self.__class__.COMMAND_TIMEOUT_S:.0f}s')
                 assert server[0] == self.server, f'Response from unknown host {server[0]}'
                 response = msg.__class__.from_bytes(response_data[:msg.__class__.sizeof()])
                 if response.type == msg.type:
@@ -1210,6 +1226,8 @@ class SuearClient:
             assert len(response_data) == 0, f'Encountered extraneous UDP message data: {response_data}'
             #print(f'[{self.server}:{port} -> Client]\n{response.type_name} {response}\n{response.data}\n\n')
             return response
+        finally:
+            self._cmd_lock.release()
     
 
     def send_open_video(self):
