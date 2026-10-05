@@ -29,6 +29,7 @@ robustness fixes on top of the original stream mirror.
 | ✨ [Features](#-features) | 🚀 [Quick start](#-quick-start) | 🧬 [How it works](#-how-it-works) |
 | 🌐 [HTTP API](#-http-api) | 🗂️ [Project layout](#-project-layout) | 🎞️ [Recorded files](#-recorded-files) |
 | 🔋 [Charging](#-charging) | ⚠️ [Known quirks](#-known-device-quirks) | 🔬 [References](#-references) |
+| 🤖 [Development notes](#-development-notes) | 📜 [License](#-license) | |
 
 ---
 
@@ -187,6 +188,21 @@ they were used to cross-check commands, ports and frame layout:
 | 🧩 | [pedrodinisf/otoscope-viewer](https://github.com/pedrodinisf/otoscope-viewer) | AiSee protocol notes, frame assembler, recorder |
 | 🧮 | [rbeilvert/otoscope](https://github.com/rbeilvert/otoscope) (`I4seasonProtocol.kt`) | Header layout, `OpenVideo` payload, `parseDevInfo`, accelerometer bit layout, 180° mount offset |
 | 📱 | Vendor mobile app (`com.i4season.bkCamera`) | Its `libWifiCamera.so` implements the protocol |
+
+---
+
+## 🤖 Development notes
+
+> 🧠 This project was written with **AI assistance**.
+
+| Icon | Who / what | Role |
+| :---: | --- | --- |
+| 🤖 | [**opencode**](https://opencode.ai) — model `opencode/mimo-v2.6-flash-free` | Reverse-engineering notes, implementation, debugging, documentation, README structure |
+| 🧑‍💻 | The repository author | Hardware testing, protocol verification, decisions and final review |
+| 🔍 | Anyone reading the source | Plain Python standard library + hand-written single-file HTML — reviewable line by line |
+
+AI-generated code and notes should be treated like any other patch: verify it
+against your own device before relying on it (see [⚠️ Known quirks](#-known-device-quirks)).
 
 ---
 
